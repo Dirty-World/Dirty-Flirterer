@@ -38,7 +38,7 @@ Everything runs on **Google Cloud Functions** + **Firestore** with **Cloud Sched
    git clone https://github.com/dirty-world/dirty-flirterer.git
    cd dirty-flirterer
    npm install      # or `pip install -r requirements.txt`
-   Provision Infra
+   
 2. Provisioning Infra
    Use Terraform to set up Firestore & Cloud Scheduler jobs.
 
