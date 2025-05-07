@@ -38,3 +38,15 @@ Everything runs on **Google Cloud Functions** + **Firestore** with **Cloud Sched
    git clone https://github.com/dirty-world/dirty-flirterer.git
    cd dirty-flirterer
    npm install      # or `pip install -r requirements.txt`
+   Provision Infra
+2. Provisioning Infra
+   Use Terraform to set up Firestore & Cloud Scheduler jobs.
+
+3. Deploy Bot
+Deploy Cloud Functions and configure your Telegram webhook.
+
+4. Configure
+Set BOT_TOKEN, chat_id, time windows, and optional admin_chat_id in .env or Firestore.
+
+5. Enjoy
+Sit back and watch Dirty Flirterer keep your group flirty, fun, and fully engaged ✨.
