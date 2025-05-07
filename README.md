@@ -1,5 +1,8 @@
 # 🚀 Dirty Flirterer
 
+![7cde5724-d95b-483f-85b2-8d7b946b496e](https://github.com/user-attachments/assets/9b50e446-ac4e-4e5f-9ee4-0eed865dd57f)
+
+
 **Effortless, flirty engagement for your Telegram group** 💖
 
 **Dirty Flirterer** by **dirty‑world** is a plug‑and‑play Telegram bot that automatically schedules:
