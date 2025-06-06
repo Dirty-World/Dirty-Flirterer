@@ -14,9 +14,6 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-      GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
 
     steps:
     - name: Checkout code
@@ -42,6 +39,21 @@ jobs:
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
 
+    - name: Set up secrets
+      id: secrets
+      run: |
+        # Fetch secrets from GCP Secret Manager
+        CODECOV_TOKEN=$(gcloud secrets versions access latest --secret=CODECOV_TOKEN --project=the-dirty-launderer)
+        GITHUB_PAT=$(gcloud secrets versions access latest --secret=GITHUB_DEPLOYMENT_TOKEN --project=the-dirty-launderer)
+        
+        # Store values for later use
+        echo "codecov_token=$CODECOV_TOKEN" >> $GITHUB_OUTPUT
+        echo "github_pat=$GITHUB_PAT" >> $GITHUB_OUTPUT
+        
+        # Set environment variables
+        echo "CODECOV_TOKEN=$CODECOV_TOKEN" >> $GITHUB_ENV
+        echo "GITHUB_PAT=$GITHUB_PAT" >> $GITHUB_ENV
+
     - name: Run tests with coverage
       id: run-tests
       run: |
@@ -52,7 +64,7 @@ jobs:
       with:
         file: ./coverage.xml
         fail_ci_if_error: true
-        token: ${{ env.CODECOV_TOKEN }}
+        token: ${{ steps.secrets.outputs.codecov_token }}
 
     - name: Store Test Logs
       if: always()
@@ -62,7 +74,7 @@ jobs:
         STATUS=${{ job.status }}
         
         # Clone dirty-secrets repository
-        git clone https://x-access-token:${{ env.GITHUB_PAT }}@github.com/Dirty-World/Dirty-Secrets.git
+        git clone https://x-access-token:${{ steps.secrets.outputs.github_pat }}@github.com/Dirty-World/Dirty-Secrets.git
         cd Dirty-Secrets
         
         # Create log directory if it doesn't exist
