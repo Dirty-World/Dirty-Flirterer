@@ -1,0 +1,158 @@
+name: Deploy Dirty Flirterer
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: write
+  id-token: write
+  actions: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        check-latest: true
+
+    - name: Cache Python dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        workload_identity_provider: "projects/60107979354/locations/global/workloadIdentityPools/github-actions-pool-prod/providers/github-actions-provider-prod"
+        service_account: "github-deployer@the-dirty-launderer.iam.gserviceaccount.com"
+
+    - name: Set up gcloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+
+    - name: Set up environment variables
+      run: |
+        echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" >> $GITHUB_ENV
+
+    - name: Deploy to Cloud Run
+      run: |
+        echo "Deploying to Cloud Run..."
+        gcloud run deploy dirty-flirterer \
+          --source . \
+          --region us-central1 \
+          --platform managed \
+          --allow-unauthenticated \
+          --set-env-vars="ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}"
+
+    - name: Store Deployment Logs
+      if: always()
+      run: |
+        # Set up timestamp
+        TIMESTAMP=$(date +'%Y%m%d_%H%M%S')
+        STATUS=${{ job.status }}
+        
+        # Clone dirty-secrets repository
+        git clone https://x-access-token:${{ secrets.GITHUB_PAT }}@github.com/Dirty-World/Dirty-Secrets.git
+        cd Dirty-Secrets
+        
+        # Create log directory if it doesn't exist
+        mkdir -p dirty-flirterer/deploy/$STATUS
+        
+        # Create deployment log
+        cat > "dirty-flirterer/deploy/$STATUS/deploy_${TIMESTAMP}_run_${{ github.run_number }}.log" << EOF
+        Deployment Log for Dirty Flirterer
+        ================================
+        Timestamp: $(date)
+        Workflow Run ID: ${{ github.run_id }}
+        Run Number: ${{ github.run_number }}
+        Status: $STATUS
+        Environment: ${{ github.event.inputs.environment || 'dev' }}
+        
+        Workflow Details:
+        ----------------
+        Name: ${{ github.workflow }}
+        Triggered by: ${{ github.actor }}
+        Branch: ${{ github.ref_name }}
+        Commit: ${{ github.event.head_commit.message }}
+        
+        Deployment Steps:
+        ----------------
+        Python Setup: ${{ steps.setup-python.outcome }}
+        Dependencies: ${{ steps.install-deps.outcome }}
+        Cloud Run Deploy: ${{ steps.deploy-cloud-run.outcome }}
+        
+        Infrastructure Details:
+        ---------------------
+        GCP Project: ${{ env.GCP_PROJECT_ID }}
+        GCS Bucket: ${{ env.GCS_BUCKET_NAME }}
+        Cloud Run Region: us-central1
+        
+        Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        EOF
+        
+        # Create audit log
+        cat > "dirty-flirterer/audit/audit_${TIMESTAMP}.log" << EOF
+        Audit Log for Dirty Flirterer Deployment
+        ======================================
+        Timestamp: $(date)
+        Workflow Run ID: ${{ github.run_id }}
+        Run Number: ${{ github.run_number }}
+        Status: $STATUS
+        Environment: ${{ github.event.inputs.environment || 'dev' }}
+        
+        Actor: ${{ github.actor }}
+        Branch: ${{ github.ref_name }}
+        Commit: ${{ github.event.head_commit.message }}
+        
+        Deployment Details:
+        -----------------
+        Service: dirty-flirterer
+        Platform: Cloud Run
+        Region: us-central1
+        Authentication: Public
+        
+        Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        EOF
+        
+        # Commit and push logs
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        git add .
+        git commit -m "Add deployment logs for Dirty Flirterer run ${{ github.run_number }}"
+        git push
+
+    - name: Notify on Failure
+      if: failure()
+      run: |
+        echo "Deployment failed. Please check the logs."
+        echo "Last successful step: ${{ steps.*.outcome }}"
+        echo "Cloud Run Status: ${{ steps.deploy-cloud-run.outcome }}" 
