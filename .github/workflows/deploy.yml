@@ -185,12 +185,13 @@ jobs:
         mkdir -p dirty-flirterer/deploy/$STATUS
         mkdir -p dirty-flirterer/audit
         
-        # Get commit message from event payload or use default
-        COMMIT_MSG="Manual deployment"
+        # Get commit message based on event type
         if [ "${{ github.event_name }}" = "push" ]; then
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-        elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-          COMMIT_MSG="Triggered by repository dispatch: ${{ github.event.client_payload.source_version }}"
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          COMMIT_MSG="Manual deployment to ${{ github.event.inputs.environment || 'dev' }}"
+        else
+          COMMIT_MSG="Deployment triggered by ${{ github.event_name }}"
         fi
         
         # Create deployment log
