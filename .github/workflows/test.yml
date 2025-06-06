@@ -14,6 +14,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
 
     steps:
     - name: Checkout code
@@ -49,7 +52,7 @@ jobs:
       with:
         file: ./coverage.xml
         fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
+        token: ${{ env.CODECOV_TOKEN }}
 
     - name: Store Test Logs
       if: always()
@@ -59,7 +62,7 @@ jobs:
         STATUS=${{ job.status }}
         
         # Clone dirty-secrets repository
-        git clone https://x-access-token:${{ secrets.GITHUB_PAT }}@github.com/Dirty-World/Dirty-Secrets.git
+        git clone https://x-access-token:${{ env.GITHUB_PAT }}@github.com/Dirty-World/Dirty-Secrets.git
         cd Dirty-Secrets
         
         # Create log directory if it doesn't exist
