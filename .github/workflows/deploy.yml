@@ -1,5 +1,6 @@
-name: Deploy Dirty Flirterer
+name: Deploy The Dirty Flirterer Bot to GCP
 
+# Trigger deployment on push to main or manual workflow_dispatch
 on:
   push:
     branches: [ main ]
@@ -18,6 +19,7 @@ permissions:
   contents: write
   id-token: write
   actions: write
+  repository-projects: write
 
 jobs:
   deploy:
@@ -49,6 +51,58 @@ jobs:
           pip install -r requirements.txt
         fi
 
+    - name: Zip bot source code
+      run: |
+        echo "Starting bot source code packaging..."
+        mkdir -p dist
+        if [ ! -d "bot" ]; then
+          echo "Error: bot directory not found"
+          exit 1
+        fi
+        echo "Found bot directory, creating minimal zip archive..."
+        cd bot
+        
+        # Verify required files exist
+        required_files=(
+          "main.py"
+          "webhook_check_function.py"
+          "utils/secret_manager.py"
+          "utils/firestore.py"
+          "utils/proxy_helper.py"
+          "utils/config/proxies.json"
+          "requirements.txt"
+          "requirements-prod.txt"
+          ".gcloudignore"
+        )
+        
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "Error: Required file $file not found"
+            exit 1
+          fi
+        done
+        
+        # Create minimal deployment package
+        zip -r ../dist/bot-source.zip main.py webhook_check_function.py utils/ requirements.txt requirements-prod.txt .gcloudignore
+        
+        if [ ! -f "../dist/bot-source.zip" ]; then
+          echo "Error: Failed to create bot-source.zip"
+          exit 1
+        fi
+        
+        # Verify package size
+        size_mb=$(du -m "../dist/bot-source.zip" | cut -f1)
+        if [ "$size_mb" -gt 50 ]; then
+          echo "Error: Package size ($size_mb MB) exceeds 50MB limit"
+          exit 1
+        fi
+        
+        # Verify package contents
+        echo "Verifying package contents..."
+        unzip -l "../dist/bot-source.zip" | grep -E "main.py|webhook_check_function.py|utils/|requirements.txt|requirements-prod.txt|.gcloudignore"
+        
+        echo "Successfully created minimal bot-source.zip (${size_mb}MB)"
+
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
       with:
@@ -62,16 +116,46 @@ jobs:
       run: |
         echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
         echo "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" >> $GITHUB_ENV
+        # Fetch GitHub token from GCP Secret Manager
+        echo "GITHUB_TOKEN=$(gcloud secrets versions access latest --secret=GITHUB_DEPLOYMENT_TOKEN --project=the-dirty-launderer)" >> $GITHUB_ENV
 
-    - name: Deploy to Cloud Run
+    - name: Upload bot source to GCS
       run: |
-        echo "Deploying to Cloud Run..."
-        gcloud run deploy dirty-flirterer \
-          --source . \
-          --region us-central1 \
-          --platform managed \
-          --allow-unauthenticated \
-          --set-env-vars="ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}"
+        echo "Uploading bot source to GCS..."
+        if ! gsutil cp dist/bot-source.zip gs://${{ env.GCS_BUCKET_NAME }}/; then
+          echo "Error: Failed to upload bot-source.zip to GCS"
+          exit 1
+        fi
+        echo "Successfully uploaded bot-source.zip to GCS"
+
+    - name: Verify GitHub Token
+      run: |
+        echo "Verifying GitHub token permissions..."
+        if [ -z "${{ env.GITHUB_TOKEN }}" ]; then
+          echo "Error: GitHub token is empty"
+          exit 1
+        fi
+        # Test token permissions
+        if ! curl -s -H "Authorization: token ${{ env.GITHUB_TOKEN }}" https://api.github.com/user | grep -q "login"; then
+          echo "Error: GitHub token is invalid or has insufficient permissions"
+          exit 1
+        fi
+        echo "GitHub token verified successfully"
+
+    - name: Trigger Infrastructure Deployment
+      uses: peter-evans/repository-dispatch@v2
+      with:
+        token: ${{ env.GITHUB_TOKEN }}
+        repository: Dirty-World/Dirty-Launderer-Infra
+        event-type: deploy-infrastructure
+        client-payload: |
+          {
+            "environment": "${{ github.event.inputs.environment || 'dev' }}",
+            "source_version": "${{ github.sha }}",
+            "bot_source_zip": "bot-source.zip"
+          }
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
     - name: Store Deployment Logs
       if: always()
@@ -81,11 +165,12 @@ jobs:
         STATUS=${{ job.status }}
         
         # Clone dirty-secrets repository
-        git clone https://x-access-token:${{ secrets.GITHUB_PAT }}@github.com/Dirty-World/Dirty-Secrets.git
+        git clone https://x-access-token:${{ env.GITHUB_TOKEN }}@github.com/Dirty-World/Dirty-Secrets.git
         cd Dirty-Secrets
         
-        # Create log directory if it doesn't exist
+        # Create log directories if they don't exist
         mkdir -p dirty-flirterer/deploy/$STATUS
+        mkdir -p dirty-flirterer/audit
         
         # Create deployment log
         cat > "dirty-flirterer/deploy/$STATUS/deploy_${TIMESTAMP}_run_${{ github.run_number }}.log" << EOF
@@ -106,15 +191,9 @@ jobs:
         
         Deployment Steps:
         ----------------
-        Python Setup: ${{ steps.setup-python.outcome }}
-        Dependencies: ${{ steps.install-deps.outcome }}
-        Cloud Run Deploy: ${{ steps.deploy-cloud-run.outcome }}
-        
-        Infrastructure Details:
-        ---------------------
-        GCP Project: ${{ env.GCP_PROJECT_ID }}
-        GCS Bucket: ${{ env.GCS_BUCKET_NAME }}
-        Cloud Run Region: us-central1
+        Source Code Packaging: ${{ steps.zip-bot.outcome }}
+        GCS Upload: ${{ steps.upload-gcs.outcome }}
+        Infrastructure Deployment: ${{ steps.trigger-deploy.outcome }}
         
         Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         EOF
@@ -133,12 +212,11 @@ jobs:
         Branch: ${{ github.ref_name }}
         Commit: ${{ github.event.head_commit.message }}
         
-        Deployment Details:
-        -----------------
-        Service: dirty-flirterer
-        Platform: Cloud Run
-        Region: us-central1
-        Authentication: Public
+        Deployment Artifacts:
+        --------------------
+        Source Package: bot-source.zip
+        GCS Bucket: ${{ env.GCS_BUCKET_NAME }}
+        GCP Project: ${{ env.GCP_PROJECT_ID }}
         
         Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         EOF
@@ -148,11 +226,4 @@ jobs:
         git config --global user.email 'actions@github.com'
         git add .
         git commit -m "Add deployment logs for Dirty Flirterer run ${{ github.run_number }}"
-        git push
-
-    - name: Notify on Failure
-      if: failure()
-      run: |
-        echo "Deployment failed. Please check the logs."
-        echo "Last successful step: ${{ steps.*.outcome }}"
-        echo "Cloud Run Status: ${{ steps.deploy-cloud-run.outcome }}" 
+        git push 
